@@ -1,4 +1,7 @@
-;a toy lisp lexer/parser, based on the talk "Lexical Scanning in Go" by Rob Pike
+;a toy lisp lexer/parser
+
+;assumes that there are no errors in the input, and requires all symbols to not start with a 
+;number
 
 (defstruct lexer
   start
@@ -29,7 +32,7 @@
 
 (defun is-number (char)
   ;returns t if char is the start of a number, nil otherwise
-  (if (find char "1234567890")
+  (if (find char "1234567890.")
       t
       nil))
 
@@ -75,4 +78,22 @@
 (lex-state lex-symbol (or (equal char #\space) (equal char #\newline)) 'symbol)
 
 (eval-when (:execute)
-  (print (run-lexer "(+ 1 234 \"abcd\" (* 3 4))")))
+  (print (run-lexer "(+ 1 23.4 \"abcd\" (* 3 4))")))
+
+(defun run-parser (tokens)
+  (loop ;with pos = 0
+     for token = (pop tokens)
+     with buffer-stack = '()
+     with cur-buffer = '()
+     ;with temp-buffer = '()
+     while tokens
+     do (cond 
+	  ((equal (car token) 'l-paren) (progn (push cur-buffer buffer-stack)
+					       (setf cur-buffer '())))
+	  ((equal (car token) 'r-paren) (setf cur-buffer (append (pop buffer-stack) (list cur-buffer))))
+	  (t (setf cur-buffer (append cur-buffer (list token)))))
+       finally (return cur-buffer)))
+
+(eval-when (:execute)
+  (print (run-lexer "(+ 1 23.4 \"abcd\" (* 3 4))"))
+  (print (run-parser (run-lexer "(+ 1 23.4 \"abcd\" (* 3 4))"))))
