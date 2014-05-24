@@ -7,6 +7,7 @@
 (setf *infix-operators* (list '+ '* '- '/ '=))
 
 (defparameter *builtins* '())
+(defparameter *macros* '())
 
 (defun comp (exp env)
   (if (atom exp)
@@ -21,6 +22,7 @@
 	((equal (car exp) 'progn) (list-comp (cdr exp) env)) 
 	((equal (car exp) 'setf) (concatenate 'string "call MySet(" (comp (cadr exp) env) ", " (comp (caddr exp) env) ")"))
 	((assoc (car exp) *builtins*) (funcall (cdr (assoc (car exp) *builtins*)) exp env))
+	((assoc (car exp) *macros*) (comp (macro-expand (cdr (assoc (car exp) *macros*)) exp) env))
 	(t (function-comp exp env)))))
 
 (defun prefix-to-infix (lst token)
@@ -83,6 +85,18 @@
 		 name " = " ret-val (string #\newline)
 		 "end function")))
 
+(defmacro defmacro-comp (exp env)
+  (let ((name (cadr exp))
+	(args (caddr exp))
+	(body (cdddr exp)))
+    `(setf *macros* (acons (quote ,name) #'(lambda ,args .,body) *macros*))))
+
+(defun macro-expand (macro-fun exp)
+  (loop with lst = (list macro-fun)
+     for sub-exp in (cdr exp)
+     collecting `(quote ,sub-exp) into sub-exps
+     finally (return (eval (concatenate 'list `(funcall ,macro-fun) sub-exps)))))
+
 (defun while-comp (exp env)
   (let ((test (comp (cadr exp) env))
 	(body (body-comp (cddr exp) env)))
@@ -117,10 +131,15 @@
 		       (for i 0 10
 			(msgbox i))
 		       (msgbox "outer loop")
-		       (msgbox i)))))
+		       (msgbox i))))
+  (outer-comp '(defmac when (condition &rest body)
+		`(if ,condition (progn ,@body))))
+  (print *macros*)
+  (print (outer-comp '(when (> x 10) (print "big")))))
 
 (eval-when (:execute)
   (setf *builtins* '())
   (setf *builtins* (acons 'defun (symbol-function 'defun-comp) *builtins*))
   (setf *builtins* (acons 'for (symbol-function 'for-comp) *builtins*))
-  (setf *builtins* (acons 'while (symbol-function 'while-comp) *builtins*)))
+  (setf *builtins* (acons 'while (symbol-function 'while-comp) *builtins*))
+  (setf *builtins* (acons 'defmac (symbol-function 'defmacro-comp) *builtins*)))
