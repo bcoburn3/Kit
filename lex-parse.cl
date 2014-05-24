@@ -1,7 +1,10 @@
 ;a toy lisp lexer/parser
 
 ;assumes that there are no errors in the input, and requires all symbols to not start with a 
-;number
+;number.
+
+(defpackage :kit)
+(in-package :kit)
 
 (defstruct lexer
   start
@@ -10,7 +13,7 @@
   tokens
   len)
 
-(defun run-lexer (code)
+(defun tokenize (code)
   ;returns a list of tokens, 
   ;tokens have the form (identifer string)
   (let ((l (make-lexer :start 0 :pos 0 :code code :tokens '() :len (length code))))
@@ -80,7 +83,7 @@
 (eval-when (:execute)
   (print (run-lexer "(+ 1 23.4 \"abcd\" (* 3 4))")))
 
-(defun run-parser (tokens)
+(defun to-tree (tokens)
   (loop ;with pos = 0
      for token = (pop tokens)
      with buffer-stack = '()
@@ -95,5 +98,5 @@
        finally (return cur-buffer)))
 
 (eval-when (:execute)
-  (print (run-lexer "(+ 1 23.4 \"abcd\" (* 3 4))"))
-  (print (run-parser (run-lexer "(+ 1 23.4 \"abcd\" (* 3 4))"))))
+  (print (tokenize "(+ 1 23.4 \"abcd\" (* 3 4) (* 1 2))"))
+  (print (to-tree (tokenize "(+ 1 23.4 \"abcd\" (* 3 4) (+ 1 2))"))))
