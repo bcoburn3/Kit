@@ -10,3 +10,4 @@ Inspired more by Clojure and Scheme than Common Lisp:
   Function definitions expand out to def's and lambda's
   Clojure style map/vector notation
   Maps and vectors can be called as functions
+Completely unconcerned with performance, chooses ease of implementation over speed every time
