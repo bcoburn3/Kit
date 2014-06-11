@@ -8,6 +8,8 @@
 
 (defparameter *builtins* '())
 (defparameter *macros* '())
+(defparameter *lambda-bodies* '())
+(defparameter *lambda-counter* 0)
 
 (defun comp (exp env)
   (if (atom exp)
@@ -23,14 +25,30 @@
 
 (defun prefix-to-infix (lst token)
   ;inserts token between each pair of elements in lst, then returns the result as a string
-  (concatenate 'string "("
-	       (reduce #'(lambda (x y) (concatenate 'string (string x) " " token " " (string y))) lst)
-	       ")"))
+  (concatenate 'string
+	       (reduce #'(lambda (x y) (concatenate 'string (string x) " " token " " (string y))) lst)))
+
+(defun add-newlines (lst)
+  (prefix-to-infix lst #\newline))
 
 (defun args-to-string (lst)
   (concatenate 'string "("
 	       (reduce #'(lambda (x y) (concatenate 'string (string x) ", " (string y))) lst)
 	       ")"))
+
+(defun int-string (int)
+  (format nil "~a" int))
+
+(defun multiple-value-let-helper (bindings body)
+  (let ((var (caar bindings))
+	(value-form (cadar bindings)))
+    (if (cdr bindings)
+	`(multiple-value-bind ,var ,value-form ,(multiple-value-let-helper (cdr bindings) body))
+	(append `(multiple-value-bind ,var ,value-form)
+		body))))
+
+(defmacro multiple-value-let (bindings &body body)
+  (multiple-value-let-helper bindings body))
 
 (defun atom-comp (exp env)
   (cond ((symbolp exp)
@@ -55,7 +73,13 @@
 	  (values new-var new-env)))))
 
 (defun set-comp (var val)
-  (concatenate 'string "myset(" var ", " val ")"))
+  ;dumb hack around the fact that VBA requires a "set a = b" if be is an object
+  ;and "a = b" if b is not an object
+  (concatenate 'string "if isobject(" val ")" (string #\newline)
+	       "set " var " = " val (string #\newline)
+	       "else" (string #\newline)
+	       var " = " val (string #\newline)
+	       "end if"))
 
 (defun if-comp (exp env)
 	(multiple-value-let (((ret-val-name new-env) (new-symbol-comp 'retval env))
@@ -66,18 +90,72 @@
 		  (concatenate 'string test-body (string #\newline)
 			       "if " test-val " then:" (string #\newline)
 			       if-body (string #\newline)
-			       (set-comp ret-val-name if-val)
+			       (set-comp ret-val-name if-val) (string #\newline)
 			       "else " (string #\newline)
 			       else-body (string #\newline)
 			       (set-comp ret-val-name else-val) (string #\newline)
-			       "end if" (string #\newline)))))
+			       "end if" ))))
 
-(defun function-comp (exp env)
-  (let ((func (car exp))
-	(args (mapcar #'(lambda (x) (comp x env)) (cdr exp))))
-    (if (find func *infix-operators*)
-	(prefix-to-infix args (format nil "~a" func))
-	(concatenate 'string (symbol-name func) (args-to-string args)))))
+(defun function-comp (id formal-args captured-args body)
+  (let ((prelude (concatenate 'string "instance = args.item(1)" #\newline
+			      "Dim LR as New Scripting.Dictionary" #\newline
+			      "Set LR = Lambda_Dict.Item(instance)" #\newline
+			      "Dim env as New Scripting.Dictionary" #\newline
+			      "set env = args.Item(2)"))
+	(formal-args-list (loop for i = 3 then (+ i 1)
+			       for arg in formal-args
+			       collect (concatenate 'string "env.Item(\"" (string arg) "\")"
+						       " = args.item(" (int-string i) "\")")))
+	(captured-args-list (loop for arg in captured-args
+				 collect (concatenate 'string "env.Item(\"" (string arg) "\")"
+							 " = LR.Item(\"" (string arg) "\")")))
+	(writeback-list (loop for arg in captured-args
+			     collect (concatenate 'string "LR.Item(\"" (string arg) "\")"
+						     " = env.Item(\"" (string arg) "\")"))))
+    (multiple-value-bind (ret-val body-text) (progn-comp body '())
+      (concatenate 'string "Public Function " id "(args)" #\newline
+		   prelude #\newline
+		   (add-newlines formal-args-list) #\newline
+		   (add-newlines captured-args-list) #\newline
+		   body-text #\newline
+		   (add-newlines writeback-list) #\newline
+		   ret-val #\newline
+		   "End Function"))))
+
+(defun lambda-comp (exp env)
+  ;General plan:  At the location where the lambda is called, add some code
+  ;to save the variables that will be captured, and return a unique ID for the 
+  ;anonymous function instance.  Then add the code that will actually be executed
+  ;when that function is called to a list of functions to be added to the end of 
+  ;the compiled code later
+  (let ((lambda-args (cadr exp))
+	(id (concatenate 'string "lambda_" (format nil "~a" (incf *lambda-counter*)))))
+    (let ((captured-vars (find-captured-vars (cddr exp) lambda-args)))
+      (let ((lambda-body (function-comp id lambda-args captured-vars (cddr exp)))
+	    (captured-saves 
+	     (map 'list #'(lambda (x) (concatenate 'string 
+						   "call " id ".add(\"" (string x)
+						   "env.item(\"" (string x) "\"))"))
+		  lambda-args))
+	    (ret-val (concatenate 'string "(\"" id "\" & Lambda_Counter)")))
+	(push lambda-body *lambda-bodies*)
+	(values 
+	 ret-val
+	 (concatenate 'string "Dim " id " As New Scripting.Dictionary" #\newline
+			     "Call " id ".Add(\"FuncID\", \"" ID "\")" #\newline
+			     (prefix-to-infix captured-saves #\newline)
+			     "Lambda_Counter = Lambda_Counter + 1" #\newline
+			     "Call LambdaDict.Add((\"" id "\" & Lambda_Counter), " id ")" #\newline))))))
+
+(defun find-captured-vars (exp args)
+  ;simply returns a list of every symbol in exp that isn't in args.  Simply accepting
+  ;the inefficiency caused by capturing every function name in every lambda, even builtins etc
+  (if (atom exp)
+      (if (and (symbolp exp)
+	       (not (find exp args)))
+	  (list exp))
+      (remove-duplicates
+       (apply #'append (map 'list #'(lambda (x) (find-captured-vars x args)) exp)))))
 
 (defun list-comp (exp env)
   (let ((exps (mapcar #'(lambda (x) (comp x env)) exp)))
@@ -103,7 +181,8 @@
   (let ((name (cadr exp))
 	(args (caddr exp))
 	(body (cdddr exp)))
-    (eval `(setf *macros* (acons (quote ,name) #'(lambda ,args .,body) *macros*)))))
+    (eval `(progn (setf *macros* (acons (quote ,name) #'(lambda ,args .,body) *macros*))
+		  (values "name" "")))))
 
 (defun macro-expand (macro-fun exp)
   (loop ;with lst = (list macro-fun)
@@ -113,7 +192,7 @@
 
 (defun while-comp (exp env)
   (let ((test (comp (cadr exp) env))
-	(body (body-comp (cddr exp) env)))
+	(body (progn-comp (cddr exp) env)))
     (concatenate 'string "while " test (string #\newline)
 		 body (string #\newline)
 		 "end while")))
@@ -122,7 +201,7 @@
   (multiple-value-bind (var new-env) (new-symbol-comp (cadr exp) env)
     (let ((start (comp (caddr exp) new-env))
 	  (end (comp (cadddr exp) new-env))
-	  (body (body-comp (cddddr exp) new-env)))
+	  (body (progn-comp (cddddr exp) new-env)))
       (concatenate 'string "for " var " = " start " to " end (string #\newline)
 		   body (string #\newline)
 		   "next " var))))
@@ -135,27 +214,13 @@
 		   body)))))
 
 (defun let-bindings (bindings env)
-  (print "let-bindings")
-  (print bindings)
   (let ((new-env env))
     (values
      (mapcar #'(lambda (x) (multiple-value-bind (var temp-env) (new-symbol-comp (car x) new-env)
-			     (print var)
 			     (setf new-env temp-env)
 			     (concatenate 'string "myset(" var ", " (comp (cadr x) new-env) ")")))
 	     bindings)
      new-env)))
-
-(defmacro multiple-value-let (bindings &body body)
-  (multiple-value-let-helper bindings body))
-
-(defun multiple-value-let-helper (bindings body)
-  (let ((var (caar bindings))
-	(value-form (cadar bindings)))
-    (if (cdr bindings)
-	`(multiple-value-bind ,var ,value-form ,(multiple-value-let-helper (cdr bindings) body))
-	(append `(multiple-value-bind ,var ,value-form)
-		body))))
 
 (defun outer-comp (exp)
   (multiple-value-bind (ret-val body) (comp exp '())
