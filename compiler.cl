@@ -3,6 +3,12 @@
 ;Key insight for the compiler:  a compiler is like an interpreter, but instead of actually
 ;doing the computation it simply outputs code which does instead
 
+(ql:quickload :alexandria)
+(ql:quickload :iterate)
+
+(defpackage kit (:use :alexandria :iterate))
+(in-package :kit)
+
 (defparameter *infix-operators* (list '+ '* '- '/ '=))
 (setf *infix-operators* (list '+ '* '- '/ '=))
 
@@ -119,7 +125,7 @@
 		   (add-newlines captured-args-list) #\newline
 		   body-text #\newline
 		   (add-newlines writeback-list) #\newline
-		   ret-val #\newline
+		   id " = " ret-val #\newline
 		   "End Function"))))
 
 (defun lambda-comp (exp env)
