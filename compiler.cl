@@ -39,11 +39,11 @@
 
 (defun atom-comp (exp env)
   (cond ((symbolp exp)
-	 (emit "Lookup(\"" (string exp) "\", Env)"))
+	 (cat "Lookup(\"" (string exp) "\", Env)"))
 	((stringp exp)
-	 (emit "Create(\"" exp ", \"string\")"))
+	 (cat "Create(\"" exp ", \"string\")"))
 	((numberp exp)
-	 (emit "Create(" (format nil "~a" exp) ", \"number\")"))
+	 (cat "Create(" (format nil "~a" exp) ", \"number\")"))
 	(t (format nil "~a" exp))))
 
 (defun if-comp (exp env)
@@ -52,18 +52,18 @@
 			     ((if-val if-body) (comp (caddr exp) new-env))
 			     ((else-val else-body) (comp (cadddr exp) new-env)))
 	  (values ret-val-name
-		  (emit test-body
-			"if " test-val " then:"
-			if-body 
-			"Lookup(\"" ret-val-name "\", Env) = (" if-val ")" 
-			"else "
-			else-body 
-			"Lookup(\"" ret-val-name "\", Env) = (" else-val ")"
-			"end if" ))))
+		  (cat test-body (string #\newline)
+		       "if " test-val " then:" (string #\newline)
+		       if-body (string #\newline)
+		       "Lookup(\"" ret-val-name "\", Env) = (" if-val ")" (string #\newline)
+		       "else " (string #\newline)
+		       else-body (string #\newline)
+		       "Lookup(\"" ret-val-name "\", Env) = (" else-val ")" (string #\newline)
+		       "end if" (string #\newline)))))
 
 (defun list-comp (exp env)
   (let ((exps (mapcar #'(lambda (x) (nth-value 1 (comp x env))) exp)))
-    (reduce #'(lambda (x y) (emit x (string #\newline) y)) exps)))
+    (reduce #'(lambda (x y) (cat x (string #\newline) y)) exps)))
 
 (defun progn-comp (exp env)
   (if (cdr exp)
@@ -73,13 +73,13 @@
 
 (defun def-comp (exp env)
   (multiple-value-let (((ret-val val-body) (comp (caddr exp) env)))
-      (let ((body (emit val-body 
+      (let ((body (cat val-body 
 			"set GlobalEnv.Item(\"" (string (cadr exp)) "\") = (" ret-val ")")))
 	(values ret-val body))))
 
 (defun set-comp (exp env)
   (multiple-value-let (((ret-val val-body) (comp (caddr exp) env)))
-      (let ((body (emit val-body (string #\newline)
+      (let ((body (cat val-body (string #\newline)
 			"set Env.Item(\"" (string (cadr exp)) "\") = (" ret-val ")")))
 	(values ret-val body))))
 
@@ -90,45 +90,45 @@
   ;when that function is called to a list of functions to be added to the end of 
   ;the compiled code later
   (let ((lambda-args (cadr exp))
-	(id (emit "lambda_" (format nil "~a" (incf *lambda-counter*)))))
+	(id (cat "lambda_" (format nil "~a" (incf *lambda-counter*)))))
     (let ((lambda-body (function-comp id lambda-args (cddr exp)))
-	  (ret-val (emit "Create(\"" id "_\" & Lambda_Counter, \"func\")")))
+	  (ret-val (cat "Create(\"" id "_\" & Lambda_Counter, \"func\")")))
       ;(print "lambda-comp")
       ;(print exp)
       ;(print lambda-args)
       (push lambda-body *lambda-bodies*)
       (values 
        ret-val
-       (emit "Dim " id " As New Collection"
-	     "Call " id ".Add(\"" ID "\")"
-	     "Dim Env_" id " as New Scripting.Dictionary"
-	     "set Env_" id " = Env"
-	     "Call " id ".Add(Env_" id ")"
-	     "Lambda_Counter = Lambda_Counter + 1"
-	     "Set GlobalEnv.item(\"" id "_\" & Lambda_Counter) =  " id)))))
+       (cat "Dim " id " As New Collection" (string #\newline)
+	    "Call " id ".Add(\"" ID "\")" (string #\newline)
+	    "Dim Env_" id " as New Scripting.Dictionary" (string #\newline)
+	    "set Env_" id " = Env" (string #\newline)
+	    "Call " id ".Add(Env_" id ")" (string #\newline)
+	    "Lambda_Counter = Lambda_Counter + 1" (string #\newline)
+	     "Set GlobalEnv.item(\"" id "_\" & Lambda_Counter) =  " id (string #\newline))))))
 
 (defun function-comp (id formal-args body)
-  (let ((prelude (emit "instance = args.item(1).getval"
-		       "Dim Env as New Scripting.Dictionary"
-		       "Dim LR as New Collection"
-		       "Set LR = Lookup(instance, Env)"
-		       "set Env = LR.item(2)"))
+  (let ((prelude (cat-newlines "instance = args.item(1).getval"
+			       "Dim Env as New Scripting.Dictionary"
+			       "Dim LR as New Collection"
+			       "Set LR = Lookup(instance, Env)"
+			       "set Env = LR.item(2)"))
 	(formal-args-list (loop for i = 2 then (+ i 1)
 			       for arg in formal-args
-			       collect (emit "set Env.Item(\"" (string arg) "\")"
+			       collect (cat "set Env.Item(\"" (string arg) "\")"
 					     " = args.item(" (int-string i) ")")))
-	(writeback (emit "Dim LR_writeback as New Collection"
-			 "Call LR_writeback.add(LR.item(1))"
-			 "Call LR_writeback.add(Env)"
-			 "set GlobalEnv.item(instance) = LR_writeback")))
+	(writeback (cat-newlines "Dim LR_writeback as New Collection"
+				 "Call LR_writeback.add(LR.item(1))"
+				 "Call LR_writeback.add(Env)"
+				 "set GlobalEnv.item(instance) = LR_writeback")))
     (multiple-value-bind (ret-val body-text) (progn-comp body '())
-      (emit "Public Function " id "(args)"
-	    prelude
-	    (add-newlines formal-args-list)
-	    body-text
-	    writeback
-	    "set current_res = " ret-val
-	    "End Function"))))
+      (cat "Public Function " id "(args)" (string #\newline)
+	   prelude (string #\newline)
+	   (add-newlines formal-args-list) (string #\newline)
+	   body-text (string #\newline)
+	   writeback (string #\newline)
+	   "set current_res = " ret-val (string #\newline)
+	   "End Function" (string #\newline)))))
 
 (defun defmacro-comp (exp env)
   (let ((name (cadr exp))
@@ -152,7 +152,7 @@
      for lst = (multiple-value-list (comp sub-exp env))
      collecting (car lst) into ret-vals
      collecting (cadr lst) into bodies
-     finally (return (values (emit "funcall" (args-to-string ret-vals))
+     finally (return (values (cat "funcall" (args-to-string ret-vals))
 			     (add-newlines bodies)))))
 
 (defun quote-comp (exp env)
@@ -161,13 +161,13 @@
 ;TODO:  add vectors, maps, etc
 
 (defun quote-atom (exp env)
-  (cond ((symbolp exp) (emit "Create(\"" (string exp) "\", \"symb\")"))
-	((stringp exp) (emit "Create(\"" exp "\", \"symb\")"))
-	((numberp exp) (emit "Create(\"" (format nil "~a" exp) "\", \"symb\")"))))
+  (cond ((symbolp exp) (cat "Create(\"" (string exp) "\", \"symb\")"))
+	((stringp exp) (cat "Create(\"" exp "\", \"symb\")"))
+	((numberp exp) (cat "Create(\"" (format nil "~a" exp) "\", \"symb\")"))))
 
 (defun quote-list (exp env)
   (let ((quoted-list (map 'list (lambda (x) (quote-comp x env)) exp)))
-    (emit "Funcall(Lookup(\"List\", Env), "
+    (cat-newlines "Funcall(Lookup(\"List\", Env), "
 		 (args-to-string quoted-list))))
 	
 
@@ -176,7 +176,7 @@
 (defun outer-comp (exp)
   (setf *lambda-bodies* '())
   (multiple-value-bind (ret-val body) (comp exp '())
-    (emit (string #\newline)
+    (cat-newlines (string #\newline)
 	  "public sub main()"
 	  "call BuiltinInit()"
 	  "dim Env as new Scripting.Dictionary"
@@ -188,10 +188,13 @@
 	  (string #\newline)
 	  (add-newlines *lambda-bodies*))))
 
-(defun emit (&rest strs)
+(defun cat-newlines (&rest strs)
   (if (> (length strs) 1)
       (add-newlines strs)
       (car strs)))
+
+(defmacro cat (&rest strs)
+  `(concatenate 'string ,@strs))
 
 (defun prefix-to-infix (lst token)
   ;inserts token between each pair of elements in lst, then returns the result as a string
@@ -218,65 +221,66 @@
      finally (return (concatenate 'list '(fn) (list vars) body vals))))
 
 (defun inline-fun (name body)
-  (emit "Public Function " name "(args as collection)"
-	"'function prelude"
-	"    instance = args.item(1).GetVal"
-	"    Dim LR as New Collection"
-	"    Set LR = GlobalEnv.item(instance)" 
-	"    Dim Env as new Scripting.Dictionary" 
-	"    Set Env = LR.item(2)" 
-	"'actual function body" 
-	body 
-	"'local environment writeback" 
-	"    Dim LR_Writeback as New Collection" 
-	"    Call LR_Writeback.Add(LR.item(1))" 
-	"    Call LR_Writeback.Add(Env)" 
-	"    Set GlobalEnv.item(instance) = LR_Writeback" 
-	"'return value" 
-	"    set Module1.current_res = res" 
-	"End Function"))
+  (cat "Public Function " name "(args as collection)" (string #\newline)
+       "'function prelude" (string #\newline)
+       "    instance = args.item(1).GetVal" (string #\newline)
+       "    Dim LR as New Collection" (string #\newline)
+       "    Set LR = GlobalEnv.item(instance)" (string #\newline)
+       "    Dim Env as new Scripting.Dictionary" (string #\newline)
+       "    Set Env = LR.item(2)" (string #\newline)
+       "'actual function body" (string #\newline)
+       body (string #\newline)
+       "'local environment writeback" (string #\newline)
+       "    Dim LR_Writeback as New Collection" (string #\newline)
+       "    Call LR_Writeback.Add(LR.item(1))" (string #\newline)
+       "    Call LR_Writeback.Add(Env)" (string #\newline)
+       "    Set GlobalEnv.item(instance) = LR_Writeback" (string #\newline)
+       "'return value" (string #\newline)
+       "    set Module1.current_res = res" (string #\newline)
+       "End Function" (string #\newline)))
 
 (defun inline-builtin-fun (name symbol body)
   (list (inline-fun name body)
 	(fun-env-add name symbol)))
 
 (defun fun-env-add (name symbol)
-  (emit "Dim " name "LR as New Collection" 
-	name "LR.Add \"" name "\"" 
-	name "LR.Add NullEnv" 
-	"Set GlobalEnv.item(\"" name "LR\") = " name "LR" 
-	"Set GlobalEnv.item(\"" symbol "\") = Create(\"" name "LR\", \"func\")"))
+  (cat "Dim " name "LR as New Collection" (string #\newline)
+       name "LR.Add \"" name "\"" (string #\newline)
+       name "LR.Add NullEnv" (string #\newline)
+       "Set GlobalEnv.item(\"" name "LR\") = " name "LR" (string #\newline)
+       "Set GlobalEnv.item(\"" symbol "\") = Create(\"" name "LR\", \"func\")" (string #\newline)))
 
 (defun add-inline-builtins (&rest funcs)
   (let ((all-list (map 'list (lambda (lst) (apply #'inline-builtin-fun lst)) funcs)))
     (let ((body-list (map 'list #'car all-list))
 	  (env-list (map 'list #'cadr all-list)))
-      (emit (add-newlines env-list) 
+      (cat-newlines (add-newlines env-list) 
 	    (string #\newline)
 	    (add-newlines body-list)))))
 
 ;tests
 (eval-when (:execute)
-  (format t "~A" (add-inline-builtins (list "Cons" "cons"
-					    (emit "Dim res as New List"
-						  "Set res.Car = args.Item(2)"
-						  "Set res.Cdr = args.Item(3)"))
-				      (list "Car" "car"
-					    (emit "Set res = args.Item(2).Car"))
-				      (list "Cdr" "cdr"
-					    (emit "Set res = args.Item(2).Cdr"))
-				      (list "CoreWhile" "core_while"
+  (format t "~A" (add-inline-builtins 
+		  (list "Cons" "cons"
+			(cat-newlines "Dim res as New List"
+				      "Set res.Car = args.Item(2)"
+				      "Set res.Cdr = args.Item(3)"))
+		  (list "Car" "car"
+			(cat-newlines "Set res = args.Item(2).Car"))
+		  (list "Cdr" "cdr"
+			(cat-newlines "Set res = args.Item(2).Cdr"))
+		  (list "CoreWhile" "core_while"
 					;args(2) is a test/body function, which must return
 					;a list with true or false as the first element and
 					;the return value of the body function as the second
 					;loops until the first value is false
-					    (emit "Dim LoopRes as new list"
-						  "Dim LoopTest as boolean"
-						  "Do"
-						  "Set LoopRes = Funcall(args.item(2))"
-						  "Set LoopTest = CoreTest(LoopRes.Car)"
-						  "Loop While LoopTest = True"
-						  "Set res = LoopRes.cdr")))))
+			(cat-newlines "Dim LoopRes as new list"
+				      "Dim LoopTest as boolean"
+				      "Do"
+				      "Set LoopRes = Funcall(args.item(2))"
+				      "Set LoopTest = CoreTest(LoopRes.Car)"
+				      "Loop While LoopTest = True"
+				      "Set res = LoopRes.cdr")))))
 			
 (eval-when (:execute)
   (setf *macros* '())
