@@ -1,59 +1,90 @@
-Attribute VB_Name = "Module1"
-Global GlobalEnv As New Scripting.Dictionary
-Global CurrentRes As Variant
-Global LambdaCounter As Integer
+Public Function KitCreate(val As Variant, kind As String)
+    Dim res As New Collection
+    Call res.add(val)
+    Call res.add(kind)
+    Set KitCreate = res
+End Function
 
-Public Function FunCall(instance, ParamArray args())
-    Set LR = GlobalEnv.item(instance.GetVal)
-    FuncName = LR.item(1)
-    Dim func As InventorVBAMember, TestFunc As InventorVBAMember
-    Dim project As InventorVBAProject, module As InventorVBAComponent
-    For Each project In ThisApplication.VBAProjects
-        For Each module In project.InventorVBAComponents
-            For Each TestFunc In module.InventorVBAMembers
-                If TestFunc.Name = FuncName Then
-                    Set func = TestFunc
-                    GoTo exitloop
-                End If
+Public Function KitLookup(key As String, env As KitEnv)
+    If env.exists(key) Then
+        Set KitLookup = env.lookup(key)
+    Else
+        Set KitLookup = KitLookup(key, env.Parent)
+    End If
+End Function
+
+Public Function KitSet(key As String, val As KitVal, env As KitEnv)
+    If env.exists(key) Then
+        Set KitSet = env.setval(key, val)
+    Else
+        Set KitSet = KitSet(key, val, env.Parent)
+    End If
+End Function
+
+Public Function KitCreateList(ParamArray args())
+    Dim res As New KitList
+    For i = UBound(args) To LBound(args) Step -1
+        Call res.Push(args(i))
+    Next
+    Set KitCreateList = KitCreate(res, "list")
+End Function
+
+Public Function KitTrue(val As KitVal)
+    If val.kind = "nil" Then
+        KitTrue = False
+    Else
+        KitTrue = True
+    End If
+End Function
+
+Public Function KitIf(test As KitVal, ifval As KitVal, elseval As KitVal)
+    If KitTrue(test) = True Then
+        Set KitIf = ifval
+    Else
+        Set KitIf = elseval
+    End If
+End Function
+
+Public Function KitCopyEnv(env As KitEnv)
+    Dim NewEnv As New KitEnv
+    If Not env.Parent Is Nothing Then
+        Set NewEnv.Parent = KitCopyEnv(env.Parent)
+    Else
+        Set NewEnv.Parent = Nothing
+    End If
+    For Each key In env.Dict.Keys
+        Call NewEnv.setval(key, env.lookup(key))
+    Next
+    Set KitCopyEnv = NewEnv
+End Function
+
+Public Function KitFuncall(func As KitVal, ParamArray args())
+    Dim LR As Collection
+    Set LR = func.val
+    Dim env As New KitEnv
+    Set env.Parent = LR.item(2)
+    names = Split(LR.item(3), ", ")
+    For i = 1 To UBound(names)
+        Call env.setval(KitCreate(names(i), "symb"), args(i))
+    Next
+    Dim FuncObj As InventorVBAMember
+    If LR.count = 4 Then
+        Set FuncObj = LR.item(4)
+    Else
+        For Each project In ThisApplication.VBAProjects
+            For Each module In project.InventorVBAComponents
+                For Each TestFunc In module.InventorVBAMembers
+                    If TestFunc.Name = LR.item(1) Then
+                        Set FuncObj = TestFunc
+                        GoTo exitloop
+                    End If
+                Next
             Next
         Next
-    Next
-    MsgBox ("function not found " & FuncName)
-    Exit Function
 exitloop:
-    Dim ArgsCollection As New Collection
-    ArgsCollection.Add instance
-    For Each arg In args
-        ArgsCollection.Add arg
-    Next
-    func.Arguments.item(1).Value = ArgsCollection
-    Dim result As Variant
-    Call func.Execute
-    'MsgBox (result)
-    Set FunCall = CurrentRes
-End Function
-
-Public Function Lookup(item, LocalEnv)
-    If LocalEnv.Exists(item) Then
-        Set Lookup = LocalEnv.item(item)
-    Else
-        Set Lookup = GlobalEnv.item(item)
     End If
-End Function
-
-Public Function CreateLVal(val, kind)
-    Dim res As New Lval
-    If InStr("number, string, func, symb", kind) <> 0 Then
-        Call res.SetVal(val, kind)
-    Else
-        Call res.SetRef(val, kind)
-    End If
-    Set Create = res
-End Function
-
-Public Function Cons(val1 As Lval, val2 As Lval)
-    Dim res As New List
-    Set res.Car = val1
-    Set res.Cdr = val2
-    Set Cons = res
+    FuncObj.Arguments.item(1).value = env
+    Dim result As New KitVal
+    FuncObj.Execute (result)
+    Set KitFuncall = result
 End Function
